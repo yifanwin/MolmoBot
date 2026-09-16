@@ -379,6 +379,11 @@ class SynthVLARBY1PolicyConfig(BasePolicyConfig):
     device: str | None = "cuda" if torch.cuda.is_available() else "cpu"
 
     checkpoint_path: str = ""  # Set to trained checkpoint
+
+    # 父类 SynthVLAPolicy.__init__/prepare_model 会读取这两个字段，必须显式声明
+    states_mode: str = "cross_attn"
+    relative_max_joint_delta: list[float] | None = None  # RBY-1 不使用 Franka 限幅，保持 None
+
     camera_names: list[str] = ["wrist_camera_r", "head_camera", "wrist_camera_l"]
     action_move_group_names: list[str] = [
         "base", "left_arm", "left_gripper", "right_arm", "right_gripper",
@@ -470,6 +475,7 @@ class MolmoBotRBY1DoorOpeningPolicy(SynthVLAPolicy):
         self.use_point_prompts: bool = getattr(pc, "use_point_prompts", False)
         self.point_prompt_camera: str = getattr(pc, "point_prompt_camera", "head_camera")
         self.max_conditioning_points: int = getattr(pc, "max_conditioning_points", 1)
+        self.clamp_gripper: bool = getattr(pc, "clamp_gripper", True)
         self.gripper_threshold: float = getattr(pc, "gripper_threshold", 5.0)
         self._conditioning_points: dict | None = None
         self._logged_obs_keys: bool = False
@@ -492,6 +498,26 @@ class MolmoBotRBY1DoorOpeningPolicy(SynthVLAPolicy):
     def set_state(self, state: MolmoBotRBY1PolicyState):
         super().set_state(state)
         self._conditioning_points = state.conditioning_points
+
+    def inference_model(self, model_input) -> dict[str, np.ndarray]:
+        """RBY-1 版本：从 action chunk 中依次取出动作，不做 Franka 的 action["arm"] 限幅。
+
+        RBY-1 动作键为 base/left_arm/left_gripper/right_arm/right_gripper（及 torso），
+        不含 "arm"，因此不能走父类 SynthVLAPolicy.inference_model 里针对 Franka
+        的 relative_max_joint_delta 限幅逻辑，与官方实机 RBY-1 policy 的执行方式一致。
+        """
+        obs = model_input[0] if isinstance(model_input, list) else model_input
+        self.obs_history.append(obs)
+
+        if self.buffer_index >= self.execute_horizon or not self.action_buffer:
+            self._populate_action_buffer(model_input)
+
+        action = self.action_buffer[self.buffer_index]
+
+        self.buffer_index += 1
+        self.step_count += 1
+
+        return action
 
     def _populate_action_buffer(self, observation) -> None:
         """Override to handle RBY1 obs format, fisheye warping, and point prompts."""
