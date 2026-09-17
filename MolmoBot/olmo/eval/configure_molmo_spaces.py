@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 import torch
@@ -7,6 +8,9 @@ from molmo_spaces.configs.abstract_exp_config import MlSpacesExpConfig
 from molmo_spaces.configs.camera_configs import RBY1GoProD455CameraSystem
 from molmo_spaces.configs.robot_configs import FrankaRobotConfig, RBY1MConfig
 from molmo_spaces.configs.policy_configs import BasePolicyConfig
+from molmo_spaces.data_generation.config.object_manipulation_datagen_configs import (
+    RBY1PickAndPlaceDataGenConfig,
+)
 from molmo_spaces.policy.base_policy import InferencePolicy, StatefulPolicy
 from molmo_spaces.evaluation.configs.evaluation_configs import JsonBenchmarkEvalConfig
 
@@ -229,6 +233,7 @@ class SynthVLAPolicyConfig(BasePolicyConfig):
     policy_type: str = "learned"
     action_type: str = "joint_pos_rel"
     policy_cls: type = None  # Set in model_post_init to avoid circular imports
+    policy_factory: type | None = None
     device: str | None = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Set to your checkpoint path (local dir or use --hf_repo with serve scripts)
@@ -258,6 +263,8 @@ class SynthVLAPolicyConfig(BasePolicyConfig):
             from olmo.eval.configure_molmo_spaces import SynthVLAPolicy
 
             object.__setattr__(self, "policy_cls", SynthVLAPolicy)
+        if self.policy_factory is None:
+            object.__setattr__(self, "policy_factory", self.policy_cls)
 
 
 class FrankaState8ClampConfig(JsonBenchmarkEvalConfig):
@@ -376,6 +383,7 @@ class SynthVLARBY1PolicyConfig(BasePolicyConfig):
     policy_type: str = "learned"
     action_type: str = "joint_pos_rel"
     policy_cls: type = None
+    policy_factory: type | None = None
     device: str | None = "cuda" if torch.cuda.is_available() else "cpu"
 
     checkpoint_path: str = ""  # Set to trained checkpoint
@@ -413,6 +421,8 @@ class SynthVLARBY1PolicyConfig(BasePolicyConfig):
             from olmo.eval.configure_molmo_spaces import SynthVLAPolicy
 
             object.__setattr__(self, "policy_cls", SynthVLAPolicy)
+        if self.policy_factory is None:
+            object.__setattr__(self, "policy_factory", self.policy_cls)
 
 
 class SynthVLARBY1EvalConfig(JsonBenchmarkEvalConfig):
@@ -681,6 +691,8 @@ class MolmoBotRBY1PolicyConfig(SynthVLARBY1PolicyConfig):
             from olmo.eval.configure_molmo_spaces import MolmoBotRBY1DoorOpeningPolicy
 
             object.__setattr__(self, "policy_cls", MolmoBotRBY1DoorOpeningPolicy)
+        if self.policy_factory is None:
+            object.__setattr__(self, "policy_factory", self.policy_cls)
 
 
 class MolmoBotRBY1EvalConfig(SynthVLARBY1EvalConfig):
@@ -878,6 +890,8 @@ class MolmoBotRBY1DoorPlusOpenPolicyConfig(MolmoBotRBY1PolicyConfig):
             from olmo.eval.configure_molmo_spaces import MolmoBotRBY1MultitaskPolicy
 
             object.__setattr__(self, "policy_cls", MolmoBotRBY1MultitaskPolicy)
+        if self.policy_factory is None:
+            object.__setattr__(self, "policy_factory", self.policy_cls)
 
 
 class MolmoBotRBY1PickPnPPolicyConfig(MolmoBotRBY1PolicyConfig):
@@ -911,6 +925,8 @@ class MolmoBotRBY1PickPnPPolicyConfig(MolmoBotRBY1PolicyConfig):
             from olmo.eval.configure_molmo_spaces import MolmoBotRBY1MultitaskPolicy
 
             object.__setattr__(self, "policy_cls", MolmoBotRBY1MultitaskPolicy)
+        if self.policy_factory is None:
+            object.__setattr__(self, "policy_factory", self.policy_cls)
 
 
 # ── Multitask Eval Configs ───────────────────────────────────────────────
@@ -939,3 +955,39 @@ class MolmoBotRBY1PickPnPEvalConfig(MolmoBotRBY1EvalConfig):
         super().model_post_init(__context)
         # Model outputs 1D torso action → use "height" mode (scalar → 6D joint mapping)
         self.robot_config.command_mode["torso"] = "height"
+
+
+class MolmoBotRBY1CuroboPickPnPEvalConfig(RBY1PickAndPlaceDataGenConfig):
+    """Oracle RBY1 pick-and-place evaluation with the existing CuRobo planner.
+
+    The JSON benchmark remains authoritative for each episode's scene, robot,
+    object, receptacle, and camera setup.  Unlike the learned MolmoBot policy,
+    the inherited planner reads the simulator's ground-truth task state and
+    uses CuRobo IK/TrajOpt; RGB observations are recorded for diagnostics but
+    are not used to choose actions.
+    """
+
+    # Keep all episodes so the evaluator can report both successes and failures.
+    requires_policy_auxiliary_objects: ClassVar[bool] = True
+    filter_for_successful_trajectories: bool = False
+    use_wandb: bool = False
+
+    # Match the RBY1 benchmark/data-generation control rates.
+    policy_dt_ms: float = 100.0
+    ctrl_dt_ms: float = 20.0
+    sim_dt_ms: float = 4.0
+    task_horizon: int = 400
+
+    def model_post_init(self, __context) -> None:
+        super().model_post_init(__context)
+        if self.policy_config is None:
+            raise RuntimeError(
+                "CuRobo policy initialization failed. Run this config in a CUDA-enabled "
+                "environment with the molmospaces curobo extra installed."
+            )
+
+        # RBY1PickAndPlaceDataGenConfig currently uses local CuRobo, but keep
+        # this explicit so an upstream default change cannot silently switch
+        # this oracle evaluation to a remote planner service.
+        self.policy_config.server_urls = []
+        self.robot_config.action_noise_config.enabled = False
