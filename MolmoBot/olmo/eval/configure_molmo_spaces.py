@@ -972,11 +972,17 @@ class MolmoBotRBY1CuroboPickPnPEvalConfig(RBY1PickAndPlaceDataGenConfig):
     filter_for_successful_trajectories: bool = False
     use_wandb: bool = False
 
+    # 基类 MlSpacesExpConfig 的默认值为 False，若不覆盖，成功瞬间不会终止 rollout，
+    # judge_success() 只在循环结束后调用一次，瞬时成功会被最终状态覆盖而记为失败。
+    # 20260917_103152 那次运行即因此把成功率低估了 2.1 倍（2.67% vs 5.61%）。
+    end_on_success: bool = True
+
     # Match the RBY1 benchmark/data-generation control rates.
     policy_dt_ms: float = 100.0
     ctrl_dt_ms: float = 20.0
     sim_dt_ms: float = 4.0
-    task_horizon: int = 400
+    # 与 20260917_103152 运行保持一致（该次运行的 pkl 中为 600）。
+    task_horizon: int = 600
 
     def model_post_init(self, __context) -> None:
         super().model_post_init(__context)
