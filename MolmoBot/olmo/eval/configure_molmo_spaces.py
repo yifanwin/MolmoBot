@@ -24,6 +24,7 @@ class SynthVLAPolicyState:
     step_count: int = 0
     obs_history: list[dict] | None = None
 
+
 class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
     """Minimal InferencePolicy wrapper for SynthManipMolmoInferenceWrapper.
 
@@ -59,8 +60,8 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
         self.prepare_model()
 
         # Default obs is 1 and delta is 8
-        self.input_window_size = getattr(self.agent.model_config , "n_obs_steps", 1)
-        self.obs_step_delta = getattr(self.agent.model_config , "obs_step_delta", 8)
+        self.input_window_size = getattr(self.agent.model_config, "n_obs_steps", 1)
+        self.obs_step_delta = getattr(self.agent.model_config, "obs_step_delta", 8)
 
     def get_state(self):
         return SynthVLAPolicyState(
@@ -81,11 +82,16 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
         if self._prepared:
             return
         self._prepared = True
-        from olmo.models.molmobot.inference_wrapper import SynthManipMolmoInferenceWrapper
+        from olmo.models.molmobot.inference_wrapper import (
+            SynthManipMolmoInferenceWrapper,
+        )
 
         checkpoint_path = self.config.policy_config.checkpoint_path
         # logger.info(f"Loading SynthManipMolmoInferenceWrapper from: {checkpoint_path}")
-        self.agent = SynthManipMolmoInferenceWrapper(checkpoint_path=checkpoint_path, states_mode=self.config.policy_config.states_mode)
+        self.agent = SynthManipMolmoInferenceWrapper(
+            checkpoint_path=checkpoint_path,
+            states_mode=self.config.policy_config.states_mode,
+        )
         # logger.info("SynthManipMolmoInferenceWrapper loaded successfully")
 
     def reset(self):
@@ -102,12 +108,22 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
         images = []
         for cam_name in self.camera_names:
             if cam_name == "exo_camera_1":
-                cam_name =  "droid_shoulder_light_randomization" if "droid_shoulder_light_randomization" in obs else "exo_camera_1"
+                cam_name = (
+                    "droid_shoulder_light_randomization"
+                    if "droid_shoulder_light_randomization" in obs
+                    else "exo_camera_1"
+                )
             elif cam_name == "wrist_camera":
-                cam_name = "wrist_camera_zed_mini" if "wrist_camera_zed_mini" in obs else "wrist_camera"
+                cam_name = (
+                    "wrist_camera_zed_mini"
+                    if "wrist_camera_zed_mini" in obs
+                    else "wrist_camera"
+                )
 
             if cam_name not in obs:
-                raise KeyError(f"Camera '{cam_name}' not in observation. Available: {list(obs.keys())}")
+                raise KeyError(
+                    f"Camera '{cam_name}' not in observation. Available: {list(obs.keys())}"
+                )
 
             cam_images = []
             # Simple case: single frame
@@ -120,11 +136,16 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
                 # Only proceed if we have history images
                 if current_history_len > 0:
                     # Calculate frame indices relative to current step (like reference implementation)
-                    current_step = current_history_len - 1  # Current step is the last index in history
+                    current_step = (
+                        current_history_len - 1
+                    )  # Current step is the last index in history
 
                     for i in range(self.input_window_size):
                         # Use the same logic as _get_camera_frames in synthmanip_dataset
-                        frame_idx = current_step - (self.input_window_size - 1 - i) * self.obs_step_delta
+                        frame_idx = (
+                            current_step
+                            - (self.input_window_size - 1 - i) * self.obs_step_delta
+                        )
 
                         # Only add valid indices (no padding)
                         if 0 <= frame_idx < current_history_len:
@@ -142,7 +163,11 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
             if "gripper" not in group_name:
                 qpos_parts.append(robot_state["qpos"][group_name])
             else:
-                qpos_parts.append(robot_state["qpos"][group_name][:self.config.policy_config.gripper_representation_count])
+                qpos_parts.append(
+                    robot_state["qpos"][group_name][
+                        : self.config.policy_config.gripper_representation_count
+                    ]
+                )
 
         state = np.concatenate(qpos_parts).astype(np.float32)
 
@@ -167,9 +192,11 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
             start_idx = 0
             for group_name in self.action_move_group_names:
                 dim = self.action_spec[group_name]
-                selected_action = pred_actions[t, start_idx: start_idx + dim]
+                selected_action = pred_actions[t, start_idx : start_idx + dim]
                 if "gripper" in group_name and self.config.policy_config.clamp_gripper:
-                    action[group_name] = np.where(selected_action > 128, 255, 0).astype(selected_action.dtype)
+                    action[group_name] = np.where(selected_action > 128, 255, 0).astype(
+                        selected_action.dtype
+                    )
                 else:
                     action[group_name] = pred_actions[t, start_idx : start_idx + dim]
                 start_idx += dim
@@ -218,7 +245,9 @@ class SynthVLAPolicy(InferencePolicy, StatefulPolicy):
 
             if np.max(relative_scale) > 1:
                 scaled_predicted_deltas = predicted_deltas / np.max(relative_scale)
-                action["arm"][:7] = obs["robot_state"]["qpos"]["arm"] + scaled_predicted_deltas
+                action["arm"][:7] = (
+                    obs["robot_state"]["qpos"]["arm"] + scaled_predicted_deltas
+                )
 
         return action
 
@@ -254,7 +283,7 @@ class SynthVLAPolicyConfig(BasePolicyConfig):
     clamp_gripper: bool = True
     gripper_representation_count: int = 1  # Number of gripper state values to input
 
-    states_mode:str = "cross_attn"
+    states_mode: str = "cross_attn"
     relative_max_joint_delta: list[float] | None = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
 
     def model_post_init(self, __context) -> None:
@@ -281,7 +310,9 @@ class FrankaState8ClampConfig(JsonBenchmarkEvalConfig):
         for mg, action_key in self.policy_config.action_keys.items():
             if action_key == "joint_pos_rel" or action_key == "delta_actions":
                 if mg == "base":
-                    self.robot_config.command_mode[mg] = "holo_joint_rel_planar_position"
+                    self.robot_config.command_mode[mg] = (
+                        "holo_joint_rel_planar_position"
+                    )
                 elif "arm" in mg:
                     self.robot_config.command_mode["arm"] = "joint_rel_position"
                 elif "gripper" in mg:
@@ -290,7 +321,7 @@ class FrankaState8ClampConfig(JsonBenchmarkEvalConfig):
 
 class FrankaState8ClampAbsPosConfig(JsonBenchmarkEvalConfig):
     policy_config: SynthVLAPolicyConfig = SynthVLAPolicyConfig(action_type="joint_pos")
-    policy_config.action_keys['arm'] = "joint_pos"
+    policy_config.action_keys["arm"] = "joint_pos"
 
     robot_config: FrankaRobotConfig = FrankaRobotConfig()
     policy_dt_ms: float = 66.0
@@ -304,7 +335,9 @@ class FrankaState8ClampAbsPosConfig(JsonBenchmarkEvalConfig):
         for mg, action_key in self.policy_config.action_keys.items():
             if action_key == "joint_pos_rel" or action_key == "delta_actions":
                 if mg == "base":
-                    self.robot_config.command_mode[mg] = "holo_joint_rel_planar_position"
+                    self.robot_config.command_mode[mg] = (
+                        "holo_joint_rel_planar_position"
+                    )
                 elif "arm" in mg:
                     self.robot_config.command_mode["arm"] = "joint_rel_position"
                 elif "gripper" in mg:
@@ -313,7 +346,7 @@ class FrankaState8ClampAbsPosConfig(JsonBenchmarkEvalConfig):
 
 class FrankaAbsPosRandomCamConfig(JsonBenchmarkEvalConfig):
     policy_config: SynthVLAPolicyConfig = SynthVLAPolicyConfig(action_type="joint_pos")
-    policy_config.action_keys['arm'] = "joint_pos"
+    policy_config.action_keys["arm"] = "joint_pos"
 
     policy_config.camera_names = ["randomized_zed2_analogue_1", "wrist_camera"]
 
@@ -329,7 +362,9 @@ class FrankaAbsPosRandomCamConfig(JsonBenchmarkEvalConfig):
         for mg, action_key in self.policy_config.action_keys.items():
             if action_key == "joint_pos_rel" or action_key == "delta_actions":
                 if mg == "base":
-                    self.robot_config.command_mode[mg] = "holo_joint_rel_planar_position"
+                    self.robot_config.command_mode[mg] = (
+                        "holo_joint_rel_planar_position"
+                    )
                 elif "arm" in mg:
                     self.robot_config.command_mode["arm"] = "joint_rel_position"
                 elif "gripper" in mg:
@@ -348,7 +383,9 @@ class SynthVLAFrankaBenchmarkOriginalEvalConfig(JsonBenchmarkEvalConfig):
     provide your robot_config and policy_config, and run with run_evaluation().
     """
 
-    policy_config: SynthVLAPolicyConfig = SynthVLAPolicyConfig(gripper_representation_count=1, clamp_gripper=False)
+    policy_config: SynthVLAPolicyConfig = SynthVLAPolicyConfig(
+        gripper_representation_count=1, clamp_gripper=False
+    )
     robot_config: FrankaRobotConfig = FrankaRobotConfig()
 
     # Set policy_dt to match the trained model's expected control rate
@@ -363,7 +400,9 @@ class SynthVLAFrankaBenchmarkOriginalEvalConfig(JsonBenchmarkEvalConfig):
         for mg, action_key in self.policy_config.action_keys.items():
             if action_key == "joint_pos_rel" or action_key == "delta_actions":
                 if mg == "base":
-                    self.robot_config.command_mode[mg] = "holo_joint_rel_planar_position"
+                    self.robot_config.command_mode[mg] = (
+                        "holo_joint_rel_planar_position"
+                    )
                 elif "arm" in mg:
                     self.robot_config.command_mode["arm"] = "joint_rel_position"
                 elif "gripper" in mg:
@@ -390,11 +429,17 @@ class SynthVLARBY1PolicyConfig(BasePolicyConfig):
 
     # 父类 SynthVLAPolicy.__init__/prepare_model 会读取这两个字段，必须显式声明
     states_mode: str = "cross_attn"
-    relative_max_joint_delta: list[float] | None = None  # RBY-1 不使用 Franka 限幅，保持 None
+    relative_max_joint_delta: list[float] | None = (
+        None  # RBY-1 不使用 Franka 限幅，保持 None
+    )
 
     camera_names: list[str] = ["wrist_camera_r", "head_camera", "wrist_camera_l"]
     action_move_group_names: list[str] = [
-        "base", "left_arm", "left_gripper", "right_arm", "right_gripper",
+        "base",
+        "left_arm",
+        "left_gripper",
+        "right_arm",
+        "right_gripper",
     ]
     action_spec: dict[str, int] = {
         "base": 3,
@@ -433,7 +478,9 @@ class SynthVLARBY1EvalConfig(JsonBenchmarkEvalConfig):
     """
 
     policy_config: SynthVLARBY1PolicyConfig = SynthVLARBY1PolicyConfig()
-    robot_config: RBY1MConfig = RBY1MConfig()  # matches data gen (rby1_v1.2_site_control.xml)
+    robot_config: RBY1MConfig = (
+        RBY1MConfig()
+    )  # matches data gen (rby1_v1.2_site_control.xml)
 
     # Updated to match config from before Feb20.
     # policy_dt_ms: float = 66.0   # ~15 Hz (matches older RBY1 datagen)
@@ -441,8 +488,8 @@ class SynthVLARBY1EvalConfig(JsonBenchmarkEvalConfig):
     # sim_dt_ms: float = 2.0       # simulation time step
     # Config after Feb20 is:
     policy_dt_ms: float = 100.0  # 10 Hz
-    ctrl_dt_ms: float = 20.0    # control time step
-    sim_dt_ms: float = 4.0      # simulation time step
+    ctrl_dt_ms: float = 20.0  # control time step
+    sim_dt_ms: float = 4.0  # simulation time step
     task_horizon: int = 400
 
     def model_post_init(self, __context) -> None:
@@ -452,7 +499,9 @@ class SynthVLARBY1EvalConfig(JsonBenchmarkEvalConfig):
         for mg, action_key in self.policy_config.action_keys.items():
             if action_key in ("joint_pos_rel", "delta_actions"):
                 if mg == "base":
-                    self.robot_config.command_mode["base"] = "holo_joint_rel_planar_position"
+                    self.robot_config.command_mode["base"] = (
+                        "holo_joint_rel_planar_position"
+                    )
                 elif "arm" in mg:
                     self.robot_config.command_mode["arm"] = "joint_rel_position"
                 elif "gripper" in mg:
@@ -483,7 +532,9 @@ class MolmoBotRBY1DoorOpeningPolicy(SynthVLAPolicy):
         pc = config.policy_config
         self.cameras_to_warp: list[str] = getattr(pc, "cameras_to_warp", [])
         self.use_point_prompts: bool = getattr(pc, "use_point_prompts", False)
-        self.point_prompt_camera: str = getattr(pc, "point_prompt_camera", "head_camera")
+        self.point_prompt_camera: str = getattr(
+            pc, "point_prompt_camera", "head_camera"
+        )
         self.max_conditioning_points: int = getattr(pc, "max_conditioning_points", 1)
         self.clamp_gripper: bool = getattr(pc, "clamp_gripper", True)
         self.gripper_threshold: float = getattr(pc, "gripper_threshold", 5.0)
@@ -634,7 +685,9 @@ class MolmoBotRBY1DoorOpeningPolicy(SynthVLAPolicy):
             if num_pts == 0:
                 continue
 
-            valid_pts = pts[:min(num_pts, self.max_conditioning_points)].copy()  # (N, 2) normalized 0-1
+            valid_pts = pts[
+                : min(num_pts, self.max_conditioning_points)
+            ].copy()  # (N, 2) normalized 0-1
 
             # Warp point coordinates if this camera is fisheye-warped
             if cam in self.cameras_to_warp:
@@ -814,7 +867,9 @@ class MolmoBotRBY1MultitaskPolicy(MolmoBotRBY1DoorOpeningPolicy):
                 part = part[self.state_indices[group_name]]
             else:
                 # Take first N dims based on state_spec (falls back to action_spec)
-                expected_dim = self.state_spec.get(group_name, self.action_spec[group_name])
+                expected_dim = self.state_spec.get(
+                    group_name, self.action_spec[group_name]
+                )
                 if part.shape[0] > expected_dim:
                     part = part[:expected_dim]
 
@@ -864,20 +919,36 @@ class MolmoBotRBY1DoorPlusOpenPolicyConfig(MolmoBotRBY1PolicyConfig):
     """Policy config for MolmoBot RBY1 door+open with torso, point prompts, conditioning image."""
 
     action_move_group_names: list[str] = [
-        "base", "left_arm", "left_gripper", "right_arm", "right_gripper", "torso",
+        "base",
+        "left_arm",
+        "left_gripper",
+        "right_arm",
+        "right_gripper",
+        "torso",
     ]
     action_spec: dict[str, int] = {
-        "base": 3, "left_arm": 7, "left_gripper": 1,
-        "right_arm": 7, "right_gripper": 1, "torso": 1,
+        "base": 3,
+        "left_arm": 7,
+        "left_gripper": 1,
+        "right_arm": 7,
+        "right_gripper": 1,
+        "torso": 1,
     }
     action_keys: dict[str, str] = {
-        "base": "joint_pos_rel", "left_arm": "joint_pos_rel",
-        "left_gripper": "joint_pos", "right_arm": "joint_pos_rel",
-        "right_gripper": "joint_pos", "torso": "joint_pos",
+        "base": "joint_pos_rel",
+        "left_arm": "joint_pos_rel",
+        "left_gripper": "joint_pos",
+        "right_arm": "joint_pos_rel",
+        "right_gripper": "joint_pos",
+        "torso": "joint_pos",
     }
     state_spec: dict[str, int] = {
-        "base": 3, "left_arm": 7, "left_gripper": 1,
-        "right_arm": 7, "right_gripper": 1, "torso": 3,
+        "base": 3,
+        "left_arm": 7,
+        "left_gripper": 1,
+        "right_arm": 7,
+        "right_gripper": 1,
+        "torso": 3,
     }
     state_indices: dict[str, list[int]] = {"torso": [1, 2, 3]}
 
@@ -900,20 +971,36 @@ class MolmoBotRBY1PickPnPPolicyConfig(MolmoBotRBY1PolicyConfig):
     clamp_gripper: bool = False  # Disable gripper clamping for pick/pnp
 
     action_move_group_names: list[str] = [
-        "base", "left_arm", "left_gripper", "right_arm", "right_gripper", "torso",
+        "base",
+        "left_arm",
+        "left_gripper",
+        "right_arm",
+        "right_gripper",
+        "torso",
     ]
     action_spec: dict[str, int] = {
-        "base": 3, "left_arm": 7, "left_gripper": 1,
-        "right_arm": 7, "right_gripper": 1, "torso": 1,
+        "base": 3,
+        "left_arm": 7,
+        "left_gripper": 1,
+        "right_arm": 7,
+        "right_gripper": 1,
+        "torso": 1,
     }
     action_keys: dict[str, str] = {
-        "base": "joint_pos_rel", "left_arm": "joint_pos_rel",
-        "left_gripper": "joint_pos", "right_arm": "joint_pos_rel",
-        "right_gripper": "joint_pos", "torso": "joint_pos",
+        "base": "joint_pos_rel",
+        "left_arm": "joint_pos_rel",
+        "left_gripper": "joint_pos",
+        "right_arm": "joint_pos_rel",
+        "right_gripper": "joint_pos",
+        "torso": "joint_pos",
     }
     state_spec: dict[str, int] = {
-        "base": 3, "left_arm": 7, "left_gripper": 1,
-        "right_arm": 7, "right_gripper": 1, "torso": 3,
+        "base": 3,
+        "left_arm": 7,
+        "left_gripper": 1,
+        "right_arm": 7,
+        "right_gripper": 1,
+        "torso": 3,
     }
     state_indices: dict[str, list[int]] = {"torso": [1, 2, 3]}
 
@@ -935,7 +1022,9 @@ class MolmoBotRBY1PickPnPPolicyConfig(MolmoBotRBY1PolicyConfig):
 class MolmoBotRBY1DoorPlusOpenEvalConfig(MolmoBotRBY1EvalConfig):
     """Eval config for MolmoBot RBY1 door+open tasks."""
 
-    policy_config: MolmoBotRBY1DoorPlusOpenPolicyConfig = MolmoBotRBY1DoorPlusOpenPolicyConfig()
+    policy_config: MolmoBotRBY1DoorPlusOpenPolicyConfig = (
+        MolmoBotRBY1DoorPlusOpenPolicyConfig()
+    )
     camera_config: RBY1GoProD455CameraSystem = RBY1GoProD455CameraSystem()
 
     def model_post_init(self, __context) -> None:

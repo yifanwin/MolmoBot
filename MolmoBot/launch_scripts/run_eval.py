@@ -17,8 +17,35 @@ import argparse
 import importlib
 import inspect
 import logging
+import os
+import sys
 import types as _python_types
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_MOLMOBOT_ROOT = Path(__file__).resolve().parents[1]
+
+# Executing ``python launch_scripts/run_eval.py`` places only the
+# ``launch_scripts`` directory on sys.path. Dynamic imports of ``olmo.*`` must
+# also work when MolmoBot has not been installed as an editable package.
+if str(_MOLMOBOT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_MOLMOBOT_ROOT))
+
+
+def _load_env_file(path: Path) -> None:
+    """Load a simple dotenv file without logging values or adding a dependency."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
 
 # --- warp 版本兼容 shim（必须在 import molmo_spaces/curobo 之前执行）---
 # curobo 0.7.8 依赖旧版 warp 的 warp.torch 桥接模块（warp 1.1 起已移除），
@@ -28,8 +55,8 @@ import warp as _warp
 
 if not hasattr(_warp, "torch"):
     _warp_torch = _python_types.ModuleType("warp.torch")
-    _warp_torch.device_from_torch = (
-        lambda torch_device: _warp.get_device(str(torch_device))
+    _warp_torch.device_from_torch = lambda torch_device: _warp.get_device(
+        str(torch_device)
     )
     _warp.torch = _warp_torch
 
@@ -54,11 +81,13 @@ def _planner_aware_setup_policy(exp_config, task, preloaded_policy, datagen_prof
 
 
 class PolicyAwareJsonEvalTaskSampler(JsonEvalTaskSampler):
-    """JSON sampler that also installs assets required by planner policies."""
+    """JSON sampler used by planner-backed evaluations.
 
-    def add_auxiliary_objects(self, spec) -> None:
-        super().add_auxiliary_objects(spec)
-        self.config.policy_config.policy_cls.add_auxiliary_objects(self.config, spec)
+    ``JsonEvalTaskSampler.add_auxiliary_objects`` already invokes the policy
+    hook.  Do not invoke it a second time here: CuRobo's hook creates named
+    ``grasp_collision_*`` bodies, and duplicate names make MuJoCo model
+    compilation fail before an episode (and therefore video recording) starts.
+    """
 
 
 class PolicyAwareJsonEvalRunner(JsonEvalRunner):
@@ -88,12 +117,14 @@ class PolicyAwareJsonEvalRunner(JsonEvalRunner):
             return JsonEvalRunner.run_single_rollout(*args, **kwargs)
         except ValueError:
             logging.getLogger(__name__).exception(
-                "CuRobo/IK rollout failed; recording the episode as unsuccessful"
+                "Planner/IK rollout failed; recording the episode as unsuccessful"
             )
             return False
 
 
 def main():
+    repo_env = _REPO_ROOT / ".env"
+    _load_env_file(repo_env)
     parser = argparse.ArgumentParser(
         description="Run SynthVLA evaluation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -141,6 +172,12 @@ def main():
         help="Evaluate only one benchmark episode by its zero-based global index",
     )
     parser.add_argument(
+        "--house_index",
+        type=int,
+        default=None,
+        help="Evaluate only episodes belonging to this benchmark house index",
+    )
+    parser.add_argument(
         "--use_wandb",
         action="store_true",
         help="Enable wandb logging",
@@ -183,6 +220,13 @@ def main():
         environment_light_intensity=args.environment_light_intensity,
         episode_idx=args.episode_idx,
     )
+    if "house_index" in inspect.signature(run_evaluation).parameters:
+        eval_kwargs["house_index"] = args.house_index
+    elif args.house_index is not None:
+        raise RuntimeError(
+            "The active molmo_spaces installation does not support --house_index. "
+            "Install the sibling checkout in editable mode or run with its environment."
+        )
     # MolmoSpaces versions before the local evaluation API cleanup expose this
     # optional keyword; the current local checkout does not. Preserve the CLI
     # flag without forcing either version of MolmoSpaces.
@@ -196,7 +240,9 @@ def main():
     # policy hook without modifying the local MolmoSpaces checkout.
     original_runner_cls = eval_main.JsonEvalRunner
     original_setup_policy = datagen_pipeline.setup_policy
-    if getattr(eval_config_cls, "requires_policy_auxiliary_objects", False):
+    if getattr(eval_config_cls, "requires_policy_auxiliary_objects", False) or getattr(
+        eval_config_cls, "requires_task_bound_policy", False
+    ):
         eval_main.JsonEvalRunner = PolicyAwareJsonEvalRunner
         # 见文件顶部 _PLANNER_POLICY_SENTINEL 的说明：跳过 eval_main 顶层的
         # policy 构造（对 planner policy 会因缺少 task 对象而崩溃），改为
