@@ -260,3 +260,13 @@ python launch_scripts/run_eval.py \
 Other released RBY1 eval configs are:
 - `olmo.eval.configure_molmo_spaces:MolmoBotRBY1DoorPlusOpenEvalConfig`
 - `olmo.eval.configure_molmo_spaces:MolmoBotRBY1PickPnPEvalConfig`
+
+### Planner 评测归属
+
+本仓 `launch_scripts/run_eval.py` 仅评测 MolmoBot learned policy。
+RBY1 CuRobo oracle、LLM waypoint 与 PandaOmron planner 均迁至相邻的
+`molmospaces`：使用 `molmo_spaces.evaluation.eval_main`，配置为
+`molmo_spaces.evaluation.configs.evaluation_configs:RBY1CuroboPickPnPEvalConfig`
+或 `RBY1LLMWaypointPickPnPEvalConfig`。成对脚本位于
+`molmospaces/scripts/evaluation/run_house4_llm_waypoint_eval.sh`，说明见
+`molmospaces/docs/planner_evaluation.md`。历史 `eval_output/` 保留原位。
